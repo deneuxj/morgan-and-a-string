@@ -18,14 +18,17 @@ let morganAndString (lineA : string, lineB : string) =
                 let seqA = work (idxA + 1, idxB)
                 let seqB = work (idxA, idxB + 1)
                 let seqAB = Seq.zip seqA seqB
-                let rec selectFirst (seq : seq<char * char>) =
-                    match Seq.isEmpty seq with
-                    | true -> seqA
-                    | false ->
-                        let (a, b) = Seq.head seq
-                        if a < b then seqA
-                        elif a > b then seqB
-                        else selectFirst (Seq.skip 1 seq)
+                let rec selectFirst (seqAB : seq<char * char>) =
+                    if Seq.isEmpty seqAB then
+                        seqA
+                    else
+                        let (a, b) = Seq.head seqAB
+                        if a < b then
+                            seqA
+                        elif a > b then
+                            seqB
+                        else
+                            selectFirst (Seq.tail seqAB)
                 seq {
                     yield a
                     yield! selectFirst seqAB
@@ -37,9 +40,16 @@ let morganAndString (lineA : string, lineB : string) =
     let chars = work (0, 0)
     new string(Array.ofSeq chars)
 
-let numTestCases = System.Console.ReadLine() |> int
+let getNextLine =
+    match System.Environment.GetCommandLineArgs() with
+    | [| _; fileName |] ->
+        let file = System.IO.File.OpenText(fileName)
+        fun () -> file.ReadLine()
+    | _ ->
+        fun () -> System.Console.ReadLine()
+let numTestCases = getNextLine() |> int
 for i in 1..numTestCases do
-    let lineA = System.Console.ReadLine()
-    let lineB = System.Console.ReadLine()
+    let lineA = getNextLine()
+    let lineB = getNextLine()
     let result = morganAndString(lineA, lineB)
     printfn "%s" result
