@@ -1,4 +1,4 @@
-﻿let cmpCharSeqs (seqA : char seq, seqB : char seq) =
+﻿let comparePrefixes (seqA : char seq, seqB : char seq) =
     let it1 = seqA.GetEnumerator()
     let it2 = seqB.GetEnumerator()
     let rec work() =
@@ -18,6 +18,11 @@
             0
     work()
 
+[<Struct>]
+type Decision =
+    | AdvanceA of xa:int
+    | AdvanceB of xb:int
+
 let morganAndString (lineA : string, lineB : string) =
     let rec commonConstantPrefixLength c (idxA, idxB) n =
         if idxA < lineA.Length && idxB < lineB.Length then
@@ -30,83 +35,91 @@ let morganAndString (lineA : string, lineB : string) =
         else
             n
 
-    let rec skipEquals eqChar (idxA, idxB) n =
-        if idxA < lineA.Length && idxB < lineB.Length then
-            let a = lineA.[idxA]
-            let b = lineB.[idxB]
-            if a = eqChar && b = eqChar then
-                // Keep looking for next position where one of the lines ends or differs from eqChar
-                skipEquals eqChar (idxA + 1, idxB + 1) (n + 1)
-            elif eqChar <= a && eqChar <= b then
-                // Advance both lines to put as many smaller eqChars first.
-                n, n
-            elif a <= eqChar && a <= b then
-                // Advance line A to get to smaller a as soon as possible.
-                n, 0
-            else
-                assert(b <= eqChar && b <= a)
-                // Advance line B to get to smaller b as soon as possible.
-                0, n
-        elif idxA < lineA.Length then
-            let a = lineA.[idxA]
-            if eqChar <= a then
-                // Advance both lines to put as many smaller eqChars before a
-                n, n
-            else
-                // Advance line A to get to smaller a as soon as possible.
-                n, 0
-        elif idxB < lineB.Length then
-            let b = lineB.[idxB]
-            if eqChar <= b then
-                // Advance both lines to put as many smaller eqChars before b
-                n, n
-            else
-                // Advance line B to get to smaller b as soon as possible.
-                0, n
-        else
-            // Advance both lines to the end
-            n, n
+    let getSelectedChars (idxA, idxB) choice : char seq =
+        seq {
+            let s, idx =
+                match choice with
+                | AdvanceA _ -> (lineA, idxA)
+                | AdvanceB _ -> (lineB, idxB)
+            let n =
+                match choice with
+                | AdvanceA n | AdvanceB n -> n
+            for i in 0..n - 1 do
+                yield s.[idx + i]
+        }
 
-    let rec work (idxA, idxB) : char seq =
-        if idxA < lineA.Length && idxB < lineB.Length then
-            let a = lineA.[idxA]
-            let b = lineB.[idxB]
-            if a < b then
-                seq {
-                    yield a
-                    yield! work (idxA + 1, idxB)
-                }
-            elif a > b then
-                seq {
-                    yield b
-                    yield! work (idxA, idxB + 1)
-                }
-            else
-                let skipLen = commonConstantPrefixLength a (idxA, idxB) 0
-                let seqA = work (idxA + skipLen, idxB)
-                let seqB = work (idxA, idxB + skipLen)
-                let cmp = cmpCharSeqs (seqA, seqB)
-                if cmp < 0 then
-                    seq {
-                        yield! Seq.replicate skipLen a
-                        yield! seqA
-                    }
+    let updateIndices (idxA, idxB) choice =
+        match choice with
+        | AdvanceA n -> (idxA + n, idxB)
+        | AdvanceB n -> (idxA, idxB + n)
+
+    let getSequence (idxA, idxB) choices =
+        seq {
+            let mutable idxA = idxA
+            let mutable idxB = idxB
+            for choice in choices do
+                let chars = getSelectedChars (idxA, idxB) choice
+                yield! chars
+                let idxA', idxB' = updateIndices (idxA, idxB) choice
+                idxA <- idxA'
+                idxB <- idxB'
+        }
+
+    let cache = System.Collections.Generic.Dictionary<(int * int), Decision>()
+
+    let rec decide(idxA, idxB) =
+        seq {
+            match cache.TryGetValue((idxA, idxB)) with
+            | true, res ->
+                yield res
+                yield! decide(updateIndices (idxA, idxB) res)
+            | false, _ ->
+                if idxA < lineA.Length && idxB < lineB.Length then
+                    let choice, nextChoices =
+                        let a = lineA.[idxA]
+                        let b = lineB.[idxB]
+                        if a < b then
+                            AdvanceA 1, []
+                        elif a > b then
+                            AdvanceB 1, []
+                        else
+                            let skipLen = commonConstantPrefixLength a (idxA, idxB) 0
+                            assert (skipLen > 0)
+                            let indicesA = updateIndices (idxA, idxB) (AdvanceA skipLen)
+                            let indicesB = updateIndices (idxA, idxB) (AdvanceB skipLen)
+//                            let indicesX = updateIndices indicesA (AdvanceB skipLen)
+//                            let seqBoth = decide indicesX |> getSequence indicesX
+                            let seqA = decide indicesA |> getSequence indicesA
+                            let seqB = decide indicesB |> getSequence indicesB
+                            let cmpAB = comparePrefixes (seqA, seqB)
+                            // let cmpBX = cmpCharSeqs (seqB, seqBoth)
+                            // let cmpAX = cmpCharSeqs (seqA, seqBoth)
+                            // if cmpAB <= 0 && cmpAX <= 0 then
+                            //     AdvanceA skipLen, []
+                            // elif cmpBX <= 0 && cmpAB >= 0 then
+                            //     AdvanceB skipLen, []
+                            // else
+                            //     AdvanceA skipLen, [AdvanceB skipLen]
+                            if cmpAB < 0 then
+                                AdvanceA skipLen, []
+                            else
+                                AdvanceB skipLen, []
+                    cache.Add((idxA, idxB), choice)
+                    yield choice
+                    let idxA, idxB = ((idxA, idxB), choice :: nextChoices) ||> Seq.fold updateIndices
+                    yield! decide(idxA, idxB)
+                elif idxA < lineA.Length then
+                    yield AdvanceA (lineA.Length - idxA)
+                elif idxB < lineB.Length then
+                    yield AdvanceB (lineB.Length - idxB)
                 else
-                    seq {
-                        yield! Seq.replicate skipLen b
-                        yield! seqB
-                    }
-                // let advA, advB = skipEquals a (idxA + 1, idxB + 1) 1
-                // seq {
-                //     yield! Seq.init (advA + advB) (fun _ -> a)
-                //     yield! work (idxA + advA, idxB + advB)
-                // }
-        elif idxA < lineA.Length then
-            lineA.[idxA..] :> char seq
-        else
-            lineB.[idxB..] :> char seq
+                    ()
+        }
 
-    let chars = work (0, 0)
+
+    let chars =
+        decide(0, 0)
+        |> getSequence (0, 0)
     new string(Array.ofSeq chars)
 
 /// Depending on the environment, read from stdin or from a file
