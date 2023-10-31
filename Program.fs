@@ -31,17 +31,6 @@ let (|Smaller|Same|Larger|) n =
     else
         Same
 let morganAndString (lineA : string, lineB : string) =
-    let rec commonConstantPrefixLength c (idxA, idxB) n =
-        if idxA < lineA.Length && idxB < lineB.Length then
-            let a = lineA.[idxA]
-            let b = lineB.[idxB]
-            if a = b && b = c then
-                commonConstantPrefixLength c (idxA + 1, idxB + 1) (n + 1)
-            else
-                n
-        else
-            n
-
     let rec tryGetNext (c, line : string, idx, n) =
         if idx >= line.Length then
             None, n
@@ -67,8 +56,12 @@ let morganAndString (lineA : string, lineB : string) =
 
     let updateIndices (idxA, idxB) choice =
         match choice with
-        | AdvanceA n -> (idxA + n, idxB)
-        | AdvanceB n -> (idxA, idxB + n)
+        | AdvanceA n ->
+            assert (n > 0)
+            (idxA + n, idxB)
+        | AdvanceB n ->
+            assert (n > 0)
+            (idxA, idxB + n)
 
     let getSequence (idxA, idxB) choices =
         seq {
@@ -82,100 +75,155 @@ let morganAndString (lineA : string, lineB : string) =
                 idxB <- idxB'
         }
 
-    let cache = System.Collections.Generic.Dictionary<(int * int), Decision>()
-
-    let rec decide(idxA, idxB) =
+    let rec decide breakTie (idxA, idxB) =
         seq {
-            match cache.TryGetValue((idxA, idxB)) with
-            | true, res ->
-                yield res
-                yield! decide(updateIndices (idxA, idxB) res)
-            | false, _ ->
-                if idxA < lineA.Length && idxB < lineB.Length then
-                    let a = lineA.[idxA]
-                    let b = lineB.[idxB]
-                    if a < b then
-                        yield AdvanceA 1
-                        yield! decide(idxA + 1, idxB)
-                    elif a > b then
-                        yield AdvanceB 1
-                        yield! decide(idxA, idxB + 1)
-                    else
-                        let a2, n2 = tryGetNext (a, lineA, idxA + 1, 1)
-                        let b2, m2 = tryGetNext (b, lineB, idxB + 1, 1)
-                        let a2 = defaultArg a2 'z'
-                        let b2 = defaultArg b2 'z'
-                        if a2 > a && b2 > a then
-                            // Put as much of 'a' as possible from both A and B
+            if idxA < lineA.Length && idxB < lineB.Length then
+                let a = lineA.[idxA]
+                let b = lineB.[idxB]
+                if a < b then
+                    yield AdvanceA 1
+                elif a > b then
+                    yield AdvanceB 1
+                else
+                    assert(a = b)
+                    let a2, n2 = tryGetNext (a, lineA, idxA + 1, 1)
+                    let b2, m2 = tryGetNext (b, lineB, idxB + 1, 1)
+                    let a2 = defaultArg a2 'z'
+                    let b2 = defaultArg b2 'z'
+                    if a2 > a && b2 > a then
+                        // Put as much of 'a' as possible from both A and B
+                        yield AdvanceA n2
+                        yield AdvanceB m2
+                    elif a2 < a && b2 < a then
+                        // Put as little of 'a' as possible, next call to 'decide' will output a smaller char
+                        if n2 < m2 then
                             yield AdvanceA n2
+                        elif n2 > m2 then
                             yield AdvanceB m2
-                            yield! decide(idxA + n2, idxB + m2)
-                        elif a2 < a && b2 < a then
-                            // Put as little of 'a' as possible, next call to 'decide' will output a smaller char
-                            if n2 < m2 then
+                        else
+                            assert(n2 = m2)
+                            if idxA + n2 = lineA.Length && idxB + m2 = lineB.Length then
+                                // It doesn't matter which one we choose, both suffixes are identical
                                 yield AdvanceA n2
-                                yield! decide(idxA + n2, idxB)
-                            elif n2 > m2 then
-                                yield AdvanceB m2
-                                yield! decide(idxA, idxB + m2)
                             else
-                                assert(n2 = m2)
                                 // Same number of 'a' in both strings, choose depending on which of next char is smallest
                                 if a2 < b2 then
                                     yield AdvanceA n2
-                                    yield! decide(idxA + n2, idxB)
                                 elif a2 > b2 then
                                     yield AdvanceB m2
-                                    yield! decide(idxA, idxB + m2)
                                 else
-                                    // Can't decide depending on next char, try each decision and see which one is right
-                                    let choiceA = decide(idxA + n2, idxB)
-                                    let seqA = getSequence (idxA + n2, idxB) choiceA
-                                    let choiceB = decide(idxA, idxB + m2)
-                                    let seqB = getSequence (idxA, idxB + m2) choiceB
-                                    if comparePrefixes (seqA, seqB) < 0 then
-                                        yield AdvanceA n2
-                                        yield! choiceA
-                                    else
-                                        yield AdvanceB m2
-                                        yield! choiceB
-                        elif a2 < a then
-                            // Get to a2 as fast as possible
-                            assert(b2 > a)
-                            yield AdvanceA n2
-                            yield! decide(idxA + n2, idxB)
-                        else
-                            // Get to b2 as fast as possible
-                            assert(a2 > a && b2 < a)
-                            yield AdvanceB m2
-                            yield! decide(idxA, idxB + m2)
-                elif idxA < lineA.Length then
-                    yield AdvanceA (lineA.Length - idxA)
-                elif idxB < lineB.Length then
-                    yield AdvanceB (lineB.Length - idxB)
-                else
-                    ()
+                                    yield! breakTie (idxA, idxB, n2)
+                    elif a2 < a then
+                        // Get to a2 as fast as possible
+                        assert(b2 > a)
+                        yield AdvanceA n2
+                    else
+                        // Get to b2 as fast as possible
+                        assert(a2 > a && b2 < a)
+                        yield AdvanceB m2
+            elif idxA < lineA.Length then
+                yield AdvanceA (lineA.Length - idxA)
+            elif idxB < lineB.Length then
+                yield AdvanceB (lineB.Length - idxB)
+            else
+                ()
         }
 
+    let rec repeatDecide breakTie (idxA, idxB) =
+        seq {
+            let choices = decide breakTie (idxA, idxB)
+            if Seq.isEmpty choices then
+                ()
+            else
+                let idxA, idxB = ((idxA, idxB), choices) ||> Seq.fold updateIndices
+                yield! choices
+                yield! repeatDecide breakTie (idxA, idxB)
+        }
 
-    let chars =
-        decide(0, 0)
+    let cache = System.Collections.Generic.Dictionary<(int * int), Decision>()
+
+    let rec breakTieBranch(idxA, idxB, n) =
+        seq {
+            match cache.TryGetValue((idxA, idxB)) with
+            | true, decision ->
+                yield decision
+                let idxA, idxB = updateIndices (idxA, idxB) decision
+                yield! decide breakTieBranch (idxA, idxB)
+            | false, _ ->
+                let choiceA = repeatDecide breakTieBranch (idxA + n, idxB)
+                let seqA = getSequence (idxA + n, idxB) choiceA
+                let choiceB = repeatDecide breakTieBranch (idxA, idxB + n)
+                let seqB = getSequence (idxA, idxB + n) choiceB
+                match comparePrefixes (seqA, seqB) with
+                | Smaller ->
+                    cache.Add((idxA, idxB), AdvanceA n)
+                    yield AdvanceA n
+                    yield! choiceA
+                | Same | Larger ->
+                    cache.Add((idxA, idxB), AdvanceB n)
+                    yield AdvanceB n
+                    yield! choiceB
+        }
+
+    let rec breakTieSingle(idxA, idxB, n) =
+        seq {
+            let ahead = decide breakTieSingle (idxA + n, idxB + n)
+            match Seq.tryHead ahead with
+            | Some (AdvanceA _) | None ->
+                yield AdvanceA n
+            | Some (AdvanceB _) ->
+                yield AdvanceB n
+        }
+
+    let charsSingle =
+        repeatDecide breakTieSingle (0, 0)
         |> getSequence (0, 0)
-    new string(Array.ofSeq chars)
+
+    let charsBranch =
+        repeatDecide breakTieBranch (0, 0)
+        |> getSequence (0, 0)
+
+    // let iter = (Seq.zip charsSingle charsBranch).GetEnumerator()
+    // while iter.MoveNext() do
+    //     let x, y = iter.Current
+    //     if x <> y then
+    //         failwithf "Mismatch: %c <> %c" x y
+    
+    new string(Array.ofSeq charsBranch)
 
 /// Depending on the environment, read from stdin or from a file
 let getNextLine =
-    match System.Environment.GetCommandLineArgs() with
-    | [| _; fileName |] ->
+    match System.Environment.GetCommandLineArgs() |> List.ofArray |> List.tail with
+    |  fileName :: _ ->
         let file = System.IO.File.OpenText(fileName)
         fun () -> file.ReadLine()
     | _ ->
         fun () -> System.Console.ReadLine()
 
+let getNextExpected =
+    match System.Environment.GetCommandLineArgs() |> List.ofArray |> List.tail with
+    | _ :: fileName :: _ ->
+        let file = System.IO.File.OpenText(fileName)
+        fun () -> file.ReadLine() |> Some
+    | _ ->
+        fun () -> None
+
 // Main program
 let numTestCases = getNextLine() |> int
+let mutable success = true
+
 for i in 1..numTestCases do
     let lineA = getNextLine()
     let lineB = getNextLine()
     let result = morganAndString(lineA, lineB)
     printfn "%s" result
+    match getNextExpected() with
+    | Some expected ->
+        if result <> expected then
+            success <- false
+            failwithf "Test %d failed: Expected \n%s, got \n%s" i expected result
+    | None ->
+        ()
+
+if not success then
+    failwith "Test failed"
