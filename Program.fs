@@ -194,7 +194,7 @@ let morganAndString (lineA : string, lineB : string) =
 
 let morganAndString2 (lineA: string, lineB: string) =
     let outLen = lineA.Length + lineB.Length
-    let rec yieldNextPos (n : int, active : int Set) =
+    let rec yieldNextPos (n : int, active : int list) =
         seq {
             // if n % 100 = 0 then
             //     eprintfn "n = %d out of %d, size = %d" n outLen active.Count
@@ -202,34 +202,38 @@ let morganAndString2 (lineA: string, lineB: string) =
                 ()
             else
                 let bestChar, nextActive =
-                    active
-                    |> Seq.collect (fun idxA ->
-                        seq {
+                    ([], active)
+                    ||> List.fold (fun res idxA ->
+                        let res =
                             if idxA < lineA.Length then
-                                yield lineA.[idxA], idxA + 1
-                            let idxB = n - idxA
-                            if idxB < lineB.Length then
-                                yield lineB.[idxB], idxA
-                        }
+                                (lineA.[idxA], idxA + 1) :: res
+                            else
+                                res
+                        let idxB = n - idxA
+                        if idxB < lineB.Length then
+                            (lineB.[idxB], idxA) :: res
+                        else
+                            res
                     )
-                    |> Seq.groupBy fst
-                    |> Seq.minBy fst
-//                eprintf "%c" bestChar
-                yield bestChar
-                let nextActive =
-                    nextActive
-                    |> Seq.map snd
-                    |> Set.ofSeq
-                    |> Set.filter (fun idxA ->
+                    |> Seq.distinctBy snd
+                    |> Seq.filter (fun (_, idxA) ->
                         let idxB = n + 1 - idxA
                         assert (idxB >= 0)
                         idxA = 0 || idxB = 0 || idxA + 1 >= lineA.Length || idxB + 1 >= lineB.Length ||
                         lineA.[idxA] <> lineA.[idxA - 1] || lineA.[idxA] <> lineA.[idxA + 1] ||
                         lineB.[idxB] <> lineB.[idxB - 1] || lineB.[idxB] <> lineB.[idxB + 1]
                     )
+                    |> List.ofSeq
+                    |> List.groupBy fst
+                    |> List.minBy fst
+//                eprintf "%c" bestChar
+                yield bestChar
+                let nextActive =
+                    nextActive
+                    |> List.map snd
                 yield! yieldNextPos (n + 1, nextActive)
         }
-    yieldNextPos (0, Set [0])
+    yieldNextPos (0, [0])
     |> Array.ofSeq
     |> System.String
 
