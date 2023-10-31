@@ -30,6 +30,7 @@ let (|Smaller|Same|Larger|) n =
         Larger
     else
         Same
+
 let morganAndString (lineA : string, lineB : string) =
     let rec tryGetNext (c, line : string, idx, n) =
         if idx >= line.Length then
@@ -191,6 +192,47 @@ let morganAndString (lineA : string, lineB : string) =
     
     new string(Array.ofSeq charsBranch)
 
+let morganAndString2 (lineA: string, lineB: string) =
+    let outLen = lineA.Length + lineB.Length
+    let rec yieldNextPos (n : int, active : int Set) =
+        seq {
+            // if n % 100 = 0 then
+            //     eprintfn "n = %d out of %d, size = %d" n outLen active.Count
+            if n >= outLen then
+                ()
+            else
+                let bestChar, nextActive =
+                    active
+                    |> Seq.collect (fun idxA ->
+                        seq {
+                            if idxA < lineA.Length then
+                                yield lineA.[idxA], idxA + 1
+                            let idxB = n - idxA
+                            if idxB < lineB.Length then
+                                yield lineB.[idxB], idxA
+                        }
+                    )
+                    |> Seq.groupBy fst
+                    |> Seq.minBy fst
+//                eprintf "%c" bestChar
+                yield bestChar
+                let nextActive =
+                    nextActive
+                    |> Seq.map snd
+                    |> Set.ofSeq
+                    |> Set.filter (fun idxA ->
+                        let idxB = n + 1 - idxA
+                        assert (idxB >= 0)
+                        idxA = 0 || idxB = 0 || idxA + 1 >= lineA.Length || idxB + 1 >= lineB.Length ||
+                        lineA.[idxA] <> lineA.[idxA - 1] || lineA.[idxA] <> lineA.[idxA + 1] ||
+                        lineB.[idxB] <> lineB.[idxB - 1] || lineB.[idxB] <> lineB.[idxB + 1]
+                    )
+                yield! yieldNextPos (n + 1, nextActive)
+        }
+    yieldNextPos (0, Set [0])
+    |> Array.ofSeq
+    |> System.String
+
 /// Depending on the environment, read from stdin or from a file
 let getNextLine =
     match System.Environment.GetCommandLineArgs() |> List.ofArray |> List.tail with
@@ -215,7 +257,7 @@ let mutable success = true
 for i in 1..numTestCases do
     let lineA = getNextLine()
     let lineB = getNextLine()
-    let result = morganAndString(lineA, lineB)
+    let result = morganAndString2(lineA, lineB)
     printfn "%s" result
     match getNextExpected() with
     | Some expected ->
