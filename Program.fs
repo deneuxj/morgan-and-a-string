@@ -23,6 +23,13 @@ type Decision =
     | AdvanceA of xa:int
     | AdvanceB of xb:int
 
+let (|Smaller|Same|Larger|) n =
+    if n < 0 then
+        Smaller
+    elif n > 0 then
+        Larger
+    else
+        Same
 let morganAndString (lineA : string, lineB : string) =
     let rec commonConstantPrefixLength c (idxA, idxB) n =
         if idxA < lineA.Length && idxB < lineB.Length then
@@ -34,6 +41,16 @@ let morganAndString (lineA : string, lineB : string) =
                 n
         else
             n
+
+    let rec tryGetNext (c, line : string, idx, n) =
+        if idx >= line.Length then
+            None, n
+        else
+            let c2 = line.[idx]
+            if c2 = c then
+                tryGetNext (c, line, idx + 1, n + 1)
+            else
+                Some c2, n
 
     let getSelectedChars (idxA, idxB) choice : char seq =
         seq {
@@ -75,39 +92,63 @@ let morganAndString (lineA : string, lineB : string) =
                 yield! decide(updateIndices (idxA, idxB) res)
             | false, _ ->
                 if idxA < lineA.Length && idxB < lineB.Length then
-                    let choice, nextChoices =
-                        let a = lineA.[idxA]
-                        let b = lineB.[idxB]
-                        if a < b then
-                            AdvanceA 1, []
-                        elif a > b then
-                            AdvanceB 1, []
-                        else
-                            let skipLen = commonConstantPrefixLength a (idxA, idxB) 0
-                            assert (skipLen > 0)
-                            let indicesA = updateIndices (idxA, idxB) (AdvanceA skipLen)
-                            let indicesB = updateIndices (idxA, idxB) (AdvanceB skipLen)
-//                            let indicesX = updateIndices indicesA (AdvanceB skipLen)
-//                            let seqBoth = decide indicesX |> getSequence indicesX
-                            let seqA = decide indicesA |> getSequence indicesA
-                            let seqB = decide indicesB |> getSequence indicesB
-                            let cmpAB = comparePrefixes (seqA, seqB)
-                            // let cmpBX = cmpCharSeqs (seqB, seqBoth)
-                            // let cmpAX = cmpCharSeqs (seqA, seqBoth)
-                            // if cmpAB <= 0 && cmpAX <= 0 then
-                            //     AdvanceA skipLen, []
-                            // elif cmpBX <= 0 && cmpAB >= 0 then
-                            //     AdvanceB skipLen, []
-                            // else
-                            //     AdvanceA skipLen, [AdvanceB skipLen]
-                            if cmpAB < 0 then
-                                AdvanceA skipLen, []
+                    let a = lineA.[idxA]
+                    let b = lineB.[idxB]
+                    if a < b then
+                        yield AdvanceA 1
+                        yield! decide(idxA + 1, idxB)
+                    elif a > b then
+                        yield AdvanceB 1
+                        yield! decide(idxA, idxB + 1)
+                    else
+                        let a2, n2 = tryGetNext (a, lineA, idxA + 1, 1)
+                        let b2, m2 = tryGetNext (b, lineB, idxB + 1, 1)
+                        let a2 = defaultArg a2 'z'
+                        let b2 = defaultArg b2 'z'
+                        if a2 > a && b2 > a then
+                            // Put as much of 'a' as possible from both A and B
+                            yield AdvanceA n2
+                            yield AdvanceB m2
+                            yield! decide(idxA + n2, idxB + m2)
+                        elif a2 < a && b2 < a then
+                            // Put as little of 'a' as possible, next call to 'decide' will output a smaller char
+                            if n2 < m2 then
+                                yield AdvanceA n2
+                                yield! decide(idxA + n2, idxB)
+                            elif n2 > m2 then
+                                yield AdvanceB m2
+                                yield! decide(idxA, idxB + m2)
                             else
-                                AdvanceB skipLen, []
-                    cache.Add((idxA, idxB), choice)
-                    yield choice
-                    let idxA, idxB = ((idxA, idxB), choice :: nextChoices) ||> Seq.fold updateIndices
-                    yield! decide(idxA, idxB)
+                                assert(n2 = m2)
+                                // Same number of 'a' in both strings, choose depending on which of next char is smallest
+                                if a2 < b2 then
+                                    yield AdvanceA n2
+                                    yield! decide(idxA + n2, idxB)
+                                elif a2 > b2 then
+                                    yield AdvanceB m2
+                                    yield! decide(idxA, idxB + m2)
+                                else
+                                    // Can't decide depending on next char, try each decision and see which one is right
+                                    let choiceA = decide(idxA + n2, idxB)
+                                    let seqA = getSequence (idxA + n2, idxB) choiceA
+                                    let choiceB = decide(idxA, idxB + m2)
+                                    let seqB = getSequence (idxA, idxB + m2) choiceB
+                                    if comparePrefixes (seqA, seqB) < 0 then
+                                        yield AdvanceA n2
+                                        yield! choiceA
+                                    else
+                                        yield AdvanceB m2
+                                        yield! choiceB
+                        elif a2 < a then
+                            // Get to a2 as fast as possible
+                            assert(b2 > a)
+                            yield AdvanceA n2
+                            yield! decide(idxA + n2, idxB)
+                        else
+                            // Get to b2 as fast as possible
+                            assert(a2 > a && b2 < a)
+                            yield AdvanceB m2
+                            yield! decide(idxA, idxB + m2)
                 elif idxA < lineA.Length then
                     yield AdvanceA (lineA.Length - idxA)
                 elif idxB < lineB.Length then
