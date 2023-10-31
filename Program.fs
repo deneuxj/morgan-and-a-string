@@ -1,4 +1,6 @@
 ﻿let morganAndString2 (lineA: string, lineB: string) =
+    // Update the lowest character and the list of positions where it occurs.
+    // The list of positions is sorted and can contain duplicates.
     let inline updateAcc ((lowestChar, res) as acc) (c, idx) =
         if c < lowestChar then
             (c, [idx])
@@ -7,6 +9,7 @@
         else
             acc
 
+    // In a sorted list, remove duplicates.
     let inline sortedDistinct (idxs : int list) =
         let rec work prev rest =
             match rest with
@@ -19,6 +22,13 @@
         work (-1) idxs
 
     let outLen = lineA.Length + lineB.Length
+
+    // n is the number of characters we have already output, active is a list of positions in line A
+    // It implicitly defines the positions in line B.
+    // Each such pair of positions in line A and B defines the next candidate character to output.
+    // There are multiple pairs because of ties between characters in line A and B.
+    // As we output characters, we update the list of active positions by throwing away positions that have bad candidates, and adding new positions from the good candidates.
+    // We also keep the active list sorted and distinct.
     let rec yieldNextPos (n : int, active : int list) =
         seq {
             // if n % 100 = 0 then
@@ -27,6 +37,7 @@
                 ()
             else
                 let bestChar, nextActive =
+                    // 'z' is higher than any other character we can encounter, so it will always be replaced by a better candidate if possible.
                     (('z', []), active)
                     ||> List.fold (fun acc idxA ->
                         let acc =
@@ -45,6 +56,9 @@
                 let nextActive =
                     nextActive
                     |> sortedDistinct
+                    // In situations where line A and B have long sequences of the same character, there is no point in interleaving advances in them.
+                    // To avoid that, we throw away pairs of positions that have the same character as the previous and next position in both lines.
+                    // In other words, at least one of the pointers must be at the start or end of a sequence of the same character.
                     |> List.filter (fun idxA ->
                         let idxB = n + 1 - idxA
                         assert (idxB >= 0)
